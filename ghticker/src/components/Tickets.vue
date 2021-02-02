@@ -117,7 +117,7 @@ export default {
                 const addUser = function(user) {
                     if (self.realUsers.filter(x => x.login === user.login).length > 0)
                         return;
-                    self.realUsers.push(Object.assign({}, user, {fixedAvailability: 0}));
+                    self.realUsers.push(user);
                 };
 
                 data.filter(x => x.user || x.assignees.length).forEach(x => {
@@ -127,7 +127,7 @@ export default {
 
                 ticketapi.getAvailabilities(this.realUsers.map(x => x.id))
                 .then(userData => {
-                    userData.forEach(availability => {
+                    userData.availabilities.forEach(availability => {
                         let user = this.realUsers.find(x => x.id === availability.id);
                         if (user)
                             user.fixedAvailability = availability.availability;
@@ -202,7 +202,8 @@ export default {
             ticketapi.setEstimate(this.selectedRepository, issue.id, issue.estimation);
         },
         availabilityChanged(user) {
-            ticketapi.setAvailability(user.id, user.fixedAvailability);
+            ticketapi.setAvailability(user.id, user.fixedAvailability)
+            .then(x => { if (!x.availability) delete user.fixedAvailability; });
         }
     },
     watch: {

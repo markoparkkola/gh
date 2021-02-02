@@ -3,38 +3,82 @@ const http = require("http");
 const hostname = '127.0.0.1';
 const port = 3000;
 
-
+let Datastore = require('nedb');
+let database = new Datastore({ filename: 'tickets.db', autoload: true });
 
 const controllers = {
-  ticket: function() {
+  ticket: function(db) {
+    this.db = db;
+
     return {
       estimates: function(req, res, data) {
         const ticketIds = JSON.parse(data.tickets);
-        return {
-          repo: data.repo,
-          estimates: ticketIds.map(x => {return { id: x, estimate: 1.00 }; })
-        };
+
+        this.db.find({ repo: data.repo, ticket: { $in: ticketIds } }, function(err, docs) {
+          let result = {
+            repo: data.repo
+          };
+
+          if (err)
+            result.error = err;
+          else {
+            result.estimates = docs ? docs.map(x => { return { id: x.ticket, estimate: x.estimate }; }) : [];
+          }
+
+          res.end(JSON.stringify(result));
+        });
       },
       estimate: function(req, res, data) {
-        return {
-          repo: data.repo,
-          id: data.ticket,
-          estimate: data.estimate,
-        };
+        this.db.update({ repo: data.repo, ticket: data.ticket }, { repo: data.repo, ticket: data.ticket, estimate: data.estimate }, { upsert: true }, function(err) {
+          let result = {
+            repo: data.repo,
+            id: data.ticket,
+            estimate: data.estimate,
+            error: err
+          };
+
+          res.end(JSON.stringify(result));
+        });
       }
     };
   },
-  user: function() {
+  user: function(db) {
+    this.db = db;
+
     return {
       availabilities: function(req, res, data) {
         const userIds = JSON.parse(data.users);
-        return userIds.map(x => {return { id: x, availability: 37.5 };});
+
+        this.db.find({ user: { $in: userIds } }, function(err, docs) {
+          let result = {
+            availabilities: docs ? docs.map(x => { return { id: x.user, availability: x.availability }; }) : [],
+            error: err
+          };
+
+          res.end(JSON.stringify(result));
+        });
       },
       availability: function(req, res, data) {
-        return {
-          id: data.user,
-          availability: data.availability
-        };
+        if (data.availability < 0)
+          this.db.remove({ user: data.user }, function(err) {
+            let result = {
+              id: data.user,
+              availability: null,
+              error: err
+            };
+
+            res.end(JSON.stringify(result));
+          });
+        else
+          this.db.update({ user: data.user}, { user: data.user, availability: data.availability }, { upsert: true }, function(err) {
+            let result = {
+              id: data.user,
+              availability: data.availability,
+              error: err
+            };
+
+            res.end(JSON.stringify(result));
+          });
       }
     };
   }
@@ -84,7 +128,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    const actionHandler = controller()[request[1]];
+    const actionHandler = controller(database)[request[1]];
     if (!actionHandler) {
       console.log('Action not found.');
       res.statusCode = 400;
@@ -96,8 +140,7 @@ const server = http.createServer((req, res) => {
     if (contentType && contentType.includes('application/json'))
       data = JSON.parse(data);
 
-    const response = actionHandler(req, res, data);
-    res.end(JSON.stringify(response));
+    actionHandler(req, res, data);
   });
 });
 

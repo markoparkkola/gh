@@ -46,9 +46,11 @@ const ghapi = {
 };
 
 axios.interceptors.request.use(function (config) {
-    const token = ghapi.getToken();
-    config.headers.Authorization = token;
-    config.headers.Accept = 'application/vnd.github.v3+json';
+    if (config.url.includes('https://api.github.com/')) {
+        const token = ghapi.getToken();
+        config.headers.Authorization = token;
+        config.headers.Accept = 'application/vnd.github.v3+json';
+    }
     return config;
 });
 

@@ -36,7 +36,7 @@
                 <td>
                     <img :src="assignee.avatar_url" :title="assignee.login" class="avatar clickable" v-for="assignee in issue.assignees" :key="assignee.id" @click.stop="filters.owner=assignee.login" />
                 </td>
-                <td><input type="number" v-model="issue.estimation" /></td>
+                <td><input type="number" v-model="issue.estimation" @change="estimationChanged(issue)" /></td>
             </tr>
         </table>
 
@@ -54,7 +54,7 @@
                 <td>{{getUserIssues(user).count}}</td>
                 <td>{{getUserIssues(user).estimation}}</td>
                 <td>{{getUserAvailability(user)}}</td>
-                <td><input type="number" v-model="user.fixedAvailability" /></td>
+                <td><input type="number" v-model="user.fixedAvailability" @change="availabilityChanged(user)" /></td>
                 <td>{{(getUserIssues(user).estimation / getUserAvailability(user) * 100).toFixed(2)}}%</td>
             </tr>
         </table>
@@ -63,6 +63,7 @@
 
 <script>
 import {ghapi} from '@/githubapi';
+import {ticketapi} from '@/ticketapi';
 
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
@@ -95,10 +96,19 @@ export default {
         }
     },
     mounted() {
-        ghapi.repos(this.user).then(data => this.repos = data);
+        ghapi.repos(this.user)
+            .then(data => this.repos = data);
     },
     methods: {
         selectRepo(repo) {
+            this.users = [];
+            this.realUsers = [];
+            this.issues = [];
+            this.filters.milestone = '';
+            this.filters.owner = '';
+            this.sorting.property = 'number';
+            this.sorting.direction = 'down';
+
             ghapi.issues(repo.owner, repo.name).then(data => {
                 this.issues = data.map(x => Object.assign({}, x, {estimation:0}));
                 this.users = [...new Set(data.filter(x => x.user).map(x => x.user.login))].sort();
@@ -114,6 +124,28 @@ export default {
                     x.assignees.forEach(y => addUser(y));
                     addUser(x.user);
                 });
+
+                ticketapi.getAvailabilities(this.realUsers.map(x => x.id))
+                .then(userData => {
+                    userData.forEach(availability => {
+                        let user = this.realUsers.find(x => x.id === availability.id);
+                        if (user)
+                            user.fixedAvailability = availability.availability;
+                    });
+                })
+                .catch(error => console.log(error));
+
+                ticketapi.getEstimates(repo.id, data.map(x => x.id))
+                .then(ticketData => {
+                    if (ticketData.repo === repo.id) {
+                        ticketData.estimates.forEach(estimate => {
+                            let issue = this.issues.find(x => x.id === estimate.id);
+                            if (issue)
+                                issue.estimation = estimate.estimate;
+                        });
+                    }
+                })
+                .catch(error => console.log(error));
             });
             ghapi.milestones(repo.owner, repo.name).then(data => this.milestones = data);
         },
@@ -165,6 +197,12 @@ export default {
             }
 
             return 365 * 7.5;
+        },
+        estimationChanged(issue) {
+            ticketapi.setEstimate(this.selectedRepository, issue.id, issue.estimation);
+        },
+        availabilityChanged(user) {
+            ticketapi.setAvailability(user.id, user.fixedAvailability);
         }
     },
     watch: {

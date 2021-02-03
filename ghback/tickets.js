@@ -12,9 +12,7 @@ const controllers = {
 
     return {
       estimates: function(req, res, data) {
-        const ticketIds = JSON.parse(data.tickets);
-
-        this.db.find({ repo: data.repo, ticket: { $in: ticketIds } }, function(err, docs) {
+        this.db.find({ repo: data.repo, ticket: { $in: data.tickets } }, function(err, docs) {
           let result = {
             repo: data.repo
           };
@@ -47,11 +45,11 @@ const controllers = {
 
     return {
       availabilities: function(req, res, data) {
-        const userIds = JSON.parse(data.users);
-
-        this.db.find({ user: { $in: userIds } }, function(err, docs) {
+        this.db.find({ repo: data.repo, milestone: data.milestone, user: { $in: data.users } }, function(err, docs) {
           let result = {
             availabilities: docs ? docs.map(x => { return { id: x.user, availability: x.availability }; }) : [],
+            repo: data.repo, 
+            milestone: data.milestone,
             error: err
           };
 
@@ -60,9 +58,11 @@ const controllers = {
       },
       availability: function(req, res, data) {
         if (data.availability < 0)
-          this.db.remove({ user: data.user }, function(err) {
+          this.db.remove({ repo: data.repo, milestone: data.milestone, user: data.user }, function(err) {
             let result = {
               id: data.user,
+              repo: data.repo,
+              milestone: data.milestone,
               availability: null,
               error: err
             };
@@ -70,15 +70,32 @@ const controllers = {
             res.end(JSON.stringify(result));
           });
         else
-          this.db.update({ user: data.user}, { user: data.user, availability: data.availability }, { upsert: true }, function(err) {
+          this.db.update({ repo: data.repo, milestone: data.milestone, user: data.user}, { repo: data.repo, milestone: data.milestone, user: data.user, availability: data.availability }, { upsert: true }, function(err) {
             let result = {
               id: data.user,
+              repo: data.repo,
+              milestone: data.milestone,
               availability: data.availability,
               error: err
             };
 
             res.end(JSON.stringify(result));
           });
+      }
+    };
+  },
+  data: function(db) {
+    this.db = db;
+
+    return {
+      bulkInsert: function(req, res, data) {
+        this.db.insert(data.estimates.map(x => { return { repo: data.repo, ticket: x.id, estimate: x.estimate }; }), function(err, docs) {
+          let result = {
+            inserted: docs.length,
+            error: err
+          };
+          res.end(JSON.stringify(result));
+        });
       }
     };
   }

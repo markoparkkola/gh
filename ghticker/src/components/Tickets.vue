@@ -10,7 +10,7 @@
                 <th>Title <span class="icon clickable" @click.stop="setSort('title')">{{getSortIcon('title')}}</span></th>
                 <th>State <span class="icon clickable" @click.stop="setSort('state')">{{getSortIcon('state')}}</span></th>
                 <th>
-                    <select v-model="filters.milestone">
+                    <select v-model="filters.milestone" @change="milestoneChanged">
                         <option value="">Milestones</option>
                         <option :value="ms.id" v-for="ms in milestones" :key="ms.id">{{ms.title}}</option>
                     </select>
@@ -36,7 +36,10 @@
                 <td>
                     <img :src="assignee.avatar_url" :title="assignee.login" class="avatar clickable" v-for="assignee in issue.assignees" :key="assignee.id" @click.stop="filters.owner=assignee.login" />
                 </td>
-                <td><input type="number" v-model="issue.estimation" @change="estimationChanged(issue)" /></td>
+                <td>
+                    <input type="number" v-model="issue.estimation" @change="estimationChanged(issue)" />
+                    <span class="clickable" @click.stop="estimationChanged(issue, 0)">{{$root.icons.crossHeavy}}</span>
+                </td>
             </tr>
         </table>
 
@@ -54,7 +57,10 @@
                 <td>{{getUserIssues(user).count}}</td>
                 <td>{{getUserIssues(user).estimation}}</td>
                 <td>{{getUserAvailability(user)}}</td>
-                <td><input type="number" v-model="user.fixedAvailability" @change="availabilityChanged(user)" /></td>
+                <td>
+                    <input type="number" :value="getFixedAvailability(user.id, selectedRepository, filters.milestone)" @change="availabilityChanged($event, user)" />
+                    <span class="clickable" @click.stop="availabilityChanged($event, user, 0)">{{$root.icons.crossHeavy}}</span>
+                </td>
                 <td>{{(getUserIssues(user).estimation / getUserAvailability(user) * 100).toFixed(2)}}%</td>
             </tr>
         </table>
@@ -85,6 +91,7 @@ export default {
             milestones: [],
             users: [],
             realUsers: [],
+            availabilities: [],
             filters: {
                 milestone: '',
                 owner: ''
@@ -100,6 +107,28 @@ export default {
             .then(data => this.repos = data);
     },
     methods: {
+        parseAndSaveIssueEstimate() {
+            const parseEstimate = function(str) {
+                const m = str.match(/\(([0-9]+)(.+?)\)$/);
+                if (!m)
+                    return 0;
+                
+                let value = parseFloat(m[1]);
+                switch(m[2]) {
+                    case 'h':
+                    case 'hour':
+                    case 'hours':
+                        return value;
+                    case 'd':
+                    case 'day':
+                    case 'days':
+                        return value * 7.5;
+                    default:
+                        return 0;
+                }
+            };
+            ticketapi.bulkInsert(this.selectedRepository, this.issues.map(x => { return { id: x.id, estimate: parseEstimate(x.title) }; }));
+        },
         selectRepo(repo) {
             this.users = [];
             this.realUsers = [];
@@ -111,6 +140,8 @@ export default {
 
             ghapi.issues(repo.owner, repo.name).then(data => {
                 this.issues = data.map(x => Object.assign({}, x, {estimation:0}));
+                this.parseAndSaveIssueEstimate();
+
                 this.users = [...new Set(data.filter(x => x.user).map(x => x.user.login))].sort();
                 const self = this;
                 
@@ -125,12 +156,10 @@ export default {
                     addUser(x.user);
                 });
 
-                ticketapi.getAvailabilities(this.realUsers.map(x => x.id))
+                ticketapi.getAvailabilities(repo.id, null, this.realUsers.map(x => x.id))
                 .then(userData => {
                     userData.availabilities.forEach(availability => {
-                        let user = this.realUsers.find(x => x.id === availability.id);
-                        if (user)
-                            user.fixedAvailability = availability.availability;
+                        self.setFixedAvailability(availability.id, userData.repo, userData.milestone, availability.availability);
                     });
                 })
                 .catch(error => console.log(error));
@@ -176,8 +205,11 @@ export default {
             };
         },
         getUserAvailability(user) {
-            if (user.fixedAvailability)
-                return user.fixedAvailability;
+            if (!user)
+                return -1;
+            const fixedAvailability = this.getFixedAvailability(user.id, this.selectedRepository, this.filters.milestone);
+            if (fixedAvailability)
+                return fixedAvailability;
             if (this.filters.milestone) {
                 const milestone = this.milestones.find(x => x.id === this.filters.milestone);
                 if (!milestone.due_on)
@@ -198,12 +230,34 @@ export default {
 
             return 365 * 7.5;
         },
-        estimationChanged(issue) {
+        estimationChanged(issue, value) {
+            issue.estimation = value === undefined ? issue.estimation : value;
             ticketapi.setEstimate(this.selectedRepository, issue.id, issue.estimation);
         },
-        availabilityChanged(user) {
-            ticketapi.setAvailability(user.id, user.fixedAvailability)
-            .then(x => { if (!x.availability) delete user.fixedAvailability; });
+        availabilityChanged(event, user, value) {
+            ticketapi.setAvailability(this.selectedRepository, this.filters.milestone, user.id, value || event.target.value)
+            .then(x => { this.setFixedAvailability(user.id, this.selectedRepository, this.filters.milestone, x.availability); });
+        },
+        milestoneChanged() {
+            const self = this;
+            ticketapi.getAvailabilities(this.selectedRepository, this.filters.milestone, this.realUsers.map(x => x.id))
+            .then(userData => {
+                userData.availabilities.forEach(availability => {
+                    self.setFixedAvailability(availability.id, userData.repo, userData.milestone, availability.availability);
+                });
+            })
+            .catch(error => console.log(error));
+        },
+        setFixedAvailability(user, repo, milestone, availability) {
+            let a = this.availabilities.find(x => x.user === user && x.repo === repo && x.milestone === milestone);
+            if (a)
+                a.availability = availability;
+            else
+                this.availabilities.push({user, repo, milestone, availability});
+        },
+        getFixedAvailability(user, repo, milestone) {
+            const a =  this.availabilities.find(x => x.user === user && x.repo === repo && x.milestone === milestone);
+            return a ? a.availability : null;
         }
     },
     watch: {

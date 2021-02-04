@@ -78,10 +78,11 @@ Date.prototype.addDays = function(days) {
 }
 
 export default {
-    name: 'tickets',
+    name: 'app-tickets',
     props: {
         user: String,
-        token: String
+        token: String,
+        backendUrl: String
     },
     data() {
         return {
@@ -127,7 +128,7 @@ export default {
                         return 0;
                 }
             };
-            ticketapi.bulkInsert(this.selectedRepository, this.issues.map(x => { return { id: x.id, estimate: parseEstimate(x.title) }; }));
+            ticketapi.bulkInsert(this.backendUrl, this.selectedRepository, this.issues.map(x => { return { id: x.id, estimate: parseEstimate(x.title) }; }));
         },
         selectRepo(repo) {
             this.users = [];
@@ -156,7 +157,7 @@ export default {
                     addUser(x.user);
                 });
 
-                ticketapi.getAvailabilities(repo.id, null, this.realUsers.map(x => x.id))
+                ticketapi.getAvailabilities(this.backendUrl, repo.id, null, this.realUsers.map(x => x.id))
                 .then(userData => {
                     userData.availabilities.forEach(availability => {
                         self.setFixedAvailability(availability.id, userData.repo, userData.milestone, availability.availability);
@@ -164,7 +165,7 @@ export default {
                 })
                 .catch(error => console.log(error));
 
-                ticketapi.getEstimates(repo.id, data.map(x => x.id))
+                ticketapi.getEstimates(this.backendUrl, repo.id, data.map(x => x.id))
                 .then(ticketData => {
                     if (ticketData.repo === repo.id) {
                         ticketData.estimates.forEach(estimate => {
@@ -232,15 +233,15 @@ export default {
         },
         estimationChanged(issue, value) {
             issue.estimation = value === undefined ? issue.estimation : value;
-            ticketapi.setEstimate(this.selectedRepository, issue.id, issue.estimation);
+            ticketapi.setEstimate(this.backendUrl, this.selectedRepository, issue.id, issue.estimation);
         },
         availabilityChanged(event, user, value) {
-            ticketapi.setAvailability(this.selectedRepository, this.filters.milestone, user.id, value || event.target.value)
+            ticketapi.setAvailability(this.backendUrl, this.selectedRepository, this.filters.milestone, user.id, value || event.target.value)
             .then(x => { this.setFixedAvailability(user.id, this.selectedRepository, this.filters.milestone, x.availability); });
         },
         milestoneChanged() {
             const self = this;
-            ticketapi.getAvailabilities(this.selectedRepository, this.filters.milestone, this.realUsers.map(x => x.id))
+            ticketapi.getAvailabilities(this.backendUrl, this.selectedRepository, this.filters.milestone, this.realUsers.map(x => x.id))
             .then(userData => {
                 userData.availabilities.forEach(availability => {
                     self.setFixedAvailability(availability.id, userData.repo, userData.milestone, availability.availability);

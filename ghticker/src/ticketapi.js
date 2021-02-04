@@ -7,37 +7,37 @@ const ticketapi = {
         else
             resolve(data);
     },    
-    getEstimates(repositoryId, ticketIds) {
+    getEstimates(url, repositoryId, ticketIds) {
         return new Promise((resolve, reject) => {
-            axios.post('http://localhost:3000/ticket/estimates', {repo: repositoryId, tickets: ticketIds})
+            axios.post(url + 'ticket/estimates', {repo: repositoryId, tickets: ticketIds})
             .then(response => this.handleResolve(resolve, reject, response.data))
             .catch(error => reject(error));
         });
     },
-    setEstimate(repositoryId, ticketId, estimate) {
+    setEstimate(url, repositoryId, ticketId, estimate) {
         return new Promise((resolve, reject) => {
-            axios.post('http://localhost:3000/ticket/estimate', {repo: repositoryId, ticket: ticketId, estimate})
+            axios.post(url + 'ticket/estimate', {repo: repositoryId, ticket: ticketId, estimate})
             .then(response => this.handleResolve(resolve, reject, response.data))
             .catch(error => reject(error));
         });
     },
-    getAvailabilities(repositoryId, milestoneId, userIds) {
+    getAvailabilities(url, repositoryId, milestoneId, userIds) {
         return new Promise((resolve, reject) => {
-            axios.post('http://localhost:3000/user/availabilities', {repo: repositoryId, milestone: milestoneId, users: userIds})
+            axios.post(url + 'user/availabilities', {repo: repositoryId, milestone: milestoneId, users: userIds})
             .then(response => this.handleResolve(resolve, reject, response.data))
             .catch(error => reject(error));
         });
     },
-    setAvailability(repositoryId, milestoneId, userId, availability) {
+    setAvailability(url, repositoryId, milestoneId, userId, availability) {
         return new Promise((resolve, reject) => {
-            axios.post('http://localhost:3000/user/availability', {repo: repositoryId, milestone: milestoneId, user: userId, availability})
+            axios.post(url + 'user/availability', {repo: repositoryId, milestone: milestoneId, user: userId, availability})
             .then(response => this.handleResolve(resolve, reject, response.data))
             .catch(error => reject(error));
         });
     },
-    bulkInsert(repositoryId, estimates) {
+    bulkInsert(url, repositoryId, estimates) {
         return new Promise((resolve, reject) => {
-            axios.post('http://localhost:3000/data/bulkInsert', {repo: repositoryId, estimates: estimates})
+            axios.post(url + 'data/bulkInsert', {repo: repositoryId, estimates: estimates})
             .then(response => this.handleResolve(resolve, reject, response.data))
             .catch(error => reject(error));
         });

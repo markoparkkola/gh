@@ -5,9 +5,11 @@
             <h1 class="float-left">GH Ticker</h1>
         </div>
         <div class="col">
+            <button class="float-right avatar" style="margin-left: 1rem" @click.stop="showSettings">{{$root.icons.pick}}</button>
             <a class="float-right btn btn-success" v-if="!showTokenInput" @click="showTokenInput=true">{{username||'login'}}</a>
             <img class="float-right avatar" :src="avatarUrl" v-if="avatarUrl && !showTokenInput" />
             <input class="float-right" type="text" v-if="showTokenInput" v-model="oldToken" @change="tokenChanged" @blur="showTokenInput=false" />
+            
         </div>
     </div>
 </template>
@@ -32,6 +34,9 @@ export default {
                 this.$emit('changed', newToken);
             }
             this.showTokenInput=false;
+        },
+        showSettings() {
+            this.$emit('settings');
         }
     },
     computed: {

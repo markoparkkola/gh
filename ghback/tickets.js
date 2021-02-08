@@ -1,17 +1,20 @@
 //Load HTTP module
+const { DH_CHECK_P_NOT_PRIME } = require("constants");
 const http = require("http");
 const hostname = '127.0.0.1';
 const port = 3000;
 
 let Datastore = require('nedb');
 let database = new Datastore({ filename: 'tickets.db', autoload: true });
+database.ensureIndex({ fieldName: 'ticket', unique: true });
+database.ensureIndex({ fieldName: 'user', unique: true, sparse: true });
 
 const controllers = {
   ticket: function(db) {
     this.db = db;
 
     return {
-      estimates: function(req, res, data) {
+      hours: function(req, res, data) {
         this.db.find({ repo: data.repo, ticket: { $in: data.tickets } }, function(err, docs) {
           let result = {
             repo: data.repo
@@ -20,18 +23,19 @@ const controllers = {
           if (err)
             result.error = err;
           else {
-            result.estimates = docs ? docs.map(x => { return { id: x.ticket, estimate: x.estimate }; }) : [];
+            result.hours = docs ? docs.map(x => { return { id: x.ticket, estimate: x.estimate || 0, materialized: x.materialized || 0 }; }) : [];
           }
 
           res.end(JSON.stringify(result));
         });
       },
-      estimate: function(req, res, data) {
-        this.db.update({ repo: data.repo, ticket: data.ticket }, { repo: data.repo, ticket: data.ticket, estimate: data.estimate }, { upsert: true }, function(err) {
+      sethours: function(req, res, data) {
+        this.db.update({ repo: data.repo, ticket: data.ticket }, { repo: data.repo, ticket: data.ticket, estimate: data.estimate, materialized: data.materialized }, { upsert: true }, function(err) {
           let result = {
             repo: data.repo,
             id: data.ticket,
             estimate: data.estimate,
+            materialized: data.materialized,
             error: err
           };
 
@@ -89,13 +93,27 @@ const controllers = {
 
     return {
       bulkInsert: function(req, res, data) {
-        this.db.insert(data.estimates.map(x => { return { repo: data.repo, ticket: x.id, estimate: x.estimate }; }), function(err, docs) {
-          let result = {
-            inserted: docs.length,
-            error: err
-          };
-          res.end(JSON.stringify(result));
+        const issues = data.estimates.filter(x => x.estimate > 0).map(x => { return { repo: data.repo, ticket: x.id, estimate: x.estimate, materialized: 0 }; });
+        issues.forEach(issue => {
+          this.db.findOne({ repo: issue.repo, ticket: issue.ticket}, function(err, doc) {
+            if (!err && !doc)
+              this.db.insert(issue, function(err, doc) {
+                console.log('bulk insert failed', issue, err);
+              });
+          });
         });
+        res.end(null);
+      },
+      clear: function(req, res, data) {
+        if (data.run === true) {
+          this.db.remove({}, { multi: true }, function (err, numRemoved) {
+            let result = {
+              removed: numRemoved,
+              error: err
+            };
+            res.end(JSON.stringify(result));
+          });
+        }
       }
     };
   }

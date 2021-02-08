@@ -1,5 +1,5 @@
 <template>    
-    <div class="row header">
+    <div class="app-header">
         <div class="col">
             <img src="@/assets/logo.png" alt="logo" class="float-left" />
             <h1 class="float-left">GH Ticker</h1>
@@ -48,7 +48,8 @@ export default {
 </script>
 
 <style scoped>
-    .header {
+    .app-header {
+        width: 100%;
         height: 46px;
         overflow: hidden;
         padding: 3px 38px;

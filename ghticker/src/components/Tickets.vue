@@ -1,5 +1,5 @@
 <template>
-    <div>
+    <div class="app-content">
         <select v-model="selectedRepository">
             <option v-for="repo in repos" :key="repo.id" :value="repo.id">{{repo.name}}</option>
         </select>
@@ -29,16 +29,25 @@
                 </th>
             </tr>
             <tr v-for="issue in sortedIssues" :key="issue.id">
-                <td>{{issue.number}}</td>
-                <td>{{issue.title}} <span class="icon" title="Pull request" v-if="issue.pull_request">{{$root.icons.link}}</span></td>
-                <td>{{issue.state}}</td>
-                <td>{{issue.milestone?.title}}</td>
+                <td><span>{{issue.number}}</span></td>
+                <td><span :title="issue.title">{{issue.title}}</span> <span class="icon" title="Pull request" v-if="issue.pull_request">{{$root.icons.link}}</span></td>
+                <td><span>{{issue.state}}</span></td>
+                <td><span>{{issue.milestone?.title}}</span></td>
                 <td>
                     <img :src="assignee.avatar_url" :title="assignee.login" class="avatar clickable" v-for="assignee in issue.assignees" :key="assignee.id" @click.stop="filters.owner=assignee.login" />
                 </td>
                 <td>
-                    <input type="number" v-model="issue.estimation" @change="estimationChanged(issue)" />
-                    <span class="clickable" @click.stop="estimationChanged(issue, 0)">{{$root.icons.crossHeavy}}</span>
+                    <div>
+                        <input type="number" v-model="issue.estimation" @change="estimationChanged(issue)" />
+                        <span class="clickable" @click.stop="estimationChanged(issue, 0)">{{$root.icons.crossHeavy}}</span>
+                        <input type="number" v-model="issue.materialized" @change="materializedChanged(issue)" />
+                        <span class="clickable" @click.stop="materializedChanged(issue, 0)">{{$root.icons.crossHeavy}}</span>
+                    </div>
+                    <div v-if="issue.estimation > 0">
+                        <div class="percentage" :style="{background: 'linear-gradient(to right, green ' + issue.readyPercentage + '%, red 5%, red'}">
+                            <span>{{issue.readyPercentage}}</span>
+                        </div>
+                    </div>
                 </td>
             </tr>
         </table>
@@ -61,7 +70,11 @@
                     <input type="number" :value="getFixedAvailability(user.id, selectedRepository, filters.milestone)" @change="availabilityChanged($event, user)" />
                     <span class="clickable" @click.stop="availabilityChanged($event, user, 0)">{{$root.icons.crossHeavy}}</span>
                 </td>
-                <td>{{(getUserIssues(user).estimation / getUserAvailability(user) * 100).toFixed(2)}}%</td>
+                <td>
+                    <div class="percentage green" :style="{background: 'linear-gradient(to right, red ' + (getUserIssues(user).estimation / getUserAvailability(user) * 100).toFixed(2) + '%, green 5%, green'}">
+                        <span>{{(getUserIssues(user).estimation / getUserAvailability(user) * 100).toFixed(2)}}%</span>
+                    </div>
+                </td>
             </tr>
         </table>
     </div>
@@ -112,7 +125,7 @@ export default {
             const parseEstimate = function(str) {
                 const m = str.match(/\(([0-9]+)(.+?)\)$/);
                 if (!m)
-                    return 0;
+                    return null;
                 
                 let value = parseFloat(m[1]);
                 switch(m[2]) {
@@ -125,10 +138,12 @@ export default {
                     case 'days':
                         return value * 7.5;
                     default:
-                        return 0;
+                        return null;
                 }
             };
-            ticketapi.bulkInsert(this.backendUrl, this.selectedRepository, this.issues.map(x => { return { id: x.id, estimate: parseEstimate(x.title) }; }));
+
+            const pushable = this.issues.map(x => { return { id: x.id, estimate: parseEstimate(x.title) }; }).filter(x => x.estimate != null);
+            ticketapi.bulkInsert(this.backendUrl, this.selectedRepository, pushable);
         },
         selectRepo(repo) {
             this.users = [];
@@ -140,7 +155,7 @@ export default {
             this.sorting.direction = 'down';
 
             ghapi.issues(repo.owner, repo.name).then(data => {
-                this.issues = data.map(x => Object.assign({}, x, {estimation:0}));
+                this.issues = data.map(x => Object.assign({}, x, {estimation:0,materialized:0}));
                 this.parseAndSaveIssueEstimate();
 
                 this.users = [...new Set(data.filter(x => x.user).map(x => x.user.login))].sort();
@@ -165,13 +180,16 @@ export default {
                 })
                 .catch(error => console.log(error));
 
-                ticketapi.getEstimates(this.backendUrl, repo.id, data.map(x => x.id))
+                ticketapi.getHours(this.backendUrl, repo.id, data.map(x => x.id))
                 .then(ticketData => {
                     if (ticketData.repo === repo.id) {
-                        ticketData.estimates.forEach(estimate => {
-                            let issue = this.issues.find(x => x.id === estimate.id);
-                            if (issue)
-                                issue.estimation = estimate.estimate;
+                        ticketData.hours.forEach(h => {
+                            let issue = this.issues.find(x => x.id === h.id);
+                            if (issue) {
+                                issue.estimation = h.estimate;
+                                issue.materialized = h.materialized;
+                                issue.readyPercentage = !h.estimate ? 0 : h.materialized / h.estimate * 100;
+                            }
                         });
                     }
                 })
@@ -233,7 +251,13 @@ export default {
         },
         estimationChanged(issue, value) {
             issue.estimation = value === undefined ? issue.estimation : value;
-            ticketapi.setEstimate(this.backendUrl, this.selectedRepository, issue.id, issue.estimation);
+            ticketapi.setHours(this.backendUrl, this.selectedRepository, issue.id, issue.estimation, issue.materialized);
+            issue.readyPercentage = !issue.estimation ? 0 : issue.materialized / issue.estimation * 100;
+        },
+        materializedChanged(issue, value) {
+            issue.materialized = value === undefined ? issue.materialized : value;
+            ticketapi.setHours(this.backendUrl, this.selectedRepository, issue.id, issue.estimation, issue.materialized);
+            issue.readyPercentage = !issue.estimation ? 0 : issue.materialized / issue.estimation * 100;
         },
         availabilityChanged(event, user, value) {
             ticketapi.setAvailability(this.backendUrl, this.selectedRepository, this.filters.milestone, user.id, value || event.target.value)
@@ -259,6 +283,17 @@ export default {
         getFixedAvailability(user, repo, milestone) {
             const a =  this.availabilities.find(x => x.user === user && x.repo === repo && x.milestone === milestone);
             return a ? a.availability : null;
+        },
+        getReadyPercentage(issue) {
+            if (issue.estimation === 0)
+                return 'N/A';
+            if (issue.materialized === 0)
+                return '0%';
+            return (issue.materialized / issue.estimation * 100).toString() + '%';
+        },
+        getReadyPercentageStyle(issue) {
+            const percentage = parseFloat(this.getReadyPercentage(issue));
+            return { background: `linear-gradient(to right, green ${percentage}, red: 20%, red` };
         }
     },
     watch: {
@@ -327,6 +362,12 @@ export default {
 </script>
 
 <style scoped>
+    .app-content {
+        margin-left: 15px;    
+        margin-right: 15px;
+        overflow: hidden;
+    }
+
     .nav-tabs li {
         padding: 3px;
     }
@@ -336,6 +377,15 @@ export default {
         white-space: nowrap;
         position: relative;
         padding-right: 2rem;
+    }
+
+    .table td > span {
+        display: inline-block;
+        max-height: 3rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 25vh;
     }
 
     .table span.icon {
@@ -356,5 +406,24 @@ export default {
 
     .clickable:hover {
         filter: brightness(115%);
+    }
+
+    .table [type=number] {
+        max-width: 4rem;
+    }
+
+    .percentage {
+        margin-top: 3px;
+        border: 1px solid black;
+        border-radius: 3px;
+        padding: 3px;
+        text-align: center;
+        font-size: 60%;
+        color: white;
+        background-color: red;
+    }
+
+    .green {
+        background-color: green;
     }
 </style>

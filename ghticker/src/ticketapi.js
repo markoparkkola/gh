@@ -7,16 +7,16 @@ const ticketapi = {
         else
             resolve(data);
     },    
-    getEstimates(url, repositoryId, ticketIds) {
+    getHours(url, repositoryId, ticketIds) {
         return new Promise((resolve, reject) => {
-            axios.post(url + 'ticket/estimates', {repo: repositoryId, tickets: ticketIds})
+            axios.post(url + 'ticket/hours', {repo: repositoryId, tickets: ticketIds})
             .then(response => this.handleResolve(resolve, reject, response.data))
             .catch(error => reject(error));
         });
     },
-    setEstimate(url, repositoryId, ticketId, estimate) {
+    setHours(url, repositoryId, ticketId, estimate, materialized) {
         return new Promise((resolve, reject) => {
-            axios.post(url + 'ticket/estimate', {repo: repositoryId, ticket: ticketId, estimate})
+            axios.post(url + 'ticket/sethours', {repo: repositoryId, ticket: ticketId, estimate, materialized})
             .then(response => this.handleResolve(resolve, reject, response.data))
             .catch(error => reject(error));
         });
@@ -41,6 +41,9 @@ const ticketapi = {
             .then(response => this.handleResolve(resolve, reject, response.data))
             .catch(error => reject(error));
         });
+    },
+    clear(url) {
+        axios.post(url + 'data/clear', {run:true});
     }
 };
 

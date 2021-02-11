@@ -1,14 +1,23 @@
 <template>
     <div class="app-content">
-        <select v-model="selectedRepository">
-            <option v-for="repo in repos" :key="repo.id" :value="repo.id">{{repo.name}}</option>
-        </select>
+        <div>
+            <label for="repositories">Repository</label> 
+            <select id="repositories" v-model="selectedRepository">
+                <option v-for="repo in repos" :key="repo.id" :value="repo.id">{{repo.name}}</option>
+            </select>
+        </div>
 
-        <table class="table">
+        <table class="table" v-if="selectedRepository">
             <tr>
                 <th># <span class="icon clickable" @click.stop="setSort('number')">{{getSortIcon('number')}}</span></th>
                 <th>Title <span class="icon clickable" @click.stop="setSort('title')">{{getSortIcon('title')}}</span></th>
                 <th>State <span class="icon clickable" @click.stop="setSort('state')">{{getSortIcon('state')}}</span></th>
+                <th>
+                    <button @click="showLabelSelector=!showLabelSelector">Labels</button>
+                    <MultiSelector :items="labels" :valueName="id" :labelName="name" v-if="showLabelSelector"></MultiSelector>
+
+                    <span class="icon clickable" @click.stop="setSort('labels')">{{getSortIcon('labels')}}</span>
+                </th>
                 <th>
                     <select v-model="filters.milestone" @change="milestoneChanged">
                         <option value="">Milestones</option>
@@ -24,7 +33,7 @@
                     <span class="icon clickable" @click.stop="setSort('assignees.login')">{{getSortIcon('assignees.login')}}</span>
                 </th>
                 <th>
-                    Estimation
+                    Est. / Materialized
                     <span class="icon clickable" @click.stop="setSort('estimation')">{{getSortIcon('estimation')}}</span>
                 </th>
             </tr>
@@ -32,6 +41,14 @@
                 <td><span>{{issue.number}}</span></td>
                 <td><span :title="issue.title">{{issue.title}}</span> <span class="icon" title="Pull request" v-if="issue.pull_request">{{$root.icons.link}}</span></td>
                 <td><span>{{issue.state}}</span></td>
+                <td>
+                    <ul class="labels">
+                        <li v-for="label in issue.labels" :key="label.id" :title="label.name">
+                            <span class="label-indicator" :style="{background: '#' + label.color}"></span>
+                            {{label.name}}
+                        </li>
+                    </ul>
+                </td>
                 <td><span>{{issue.milestone?.title}}</span></td>
                 <td>
                     <img :src="assignee.avatar_url" :title="assignee.login" class="avatar clickable" v-for="assignee in issue.assignees" :key="assignee.id" @click.stop="filters.owner=assignee.login" />
@@ -52,7 +69,7 @@
             </tr>
         </table>
 
-        <table class="table">
+        <table class="table" v-if="selectedRepository">
             <tr>
                 <th>Name</th>
                 <th>Issue count</th>
@@ -83,6 +100,7 @@
 <script>
 import {ghapi} from '@/githubapi';
 import {ticketapi} from '@/ticketapi';
+import MultiSelector from './MultiSelector.vue';
 
 Date.prototype.addDays = function(days) {
     var date = new Date(this.valueOf());
@@ -102,19 +120,25 @@ export default {
             selectedRepository: null,
             repos: [],
             issues: [],
+            labels: [],
             milestones: [],
             users: [],
             realUsers: [],
             availabilities: [],
             filters: {
+                labels: [],
                 milestone: '',
                 owner: ''
             },
             sorting: {
                 property: 'number',
                 direction: 'down'
-            }
+            },
+            showLabelSelector: false
         }
+    },
+    components: {
+        MultiSelector
     },
     mounted() {
         ghapi.repos(this.user)
@@ -142,13 +166,14 @@ export default {
                 }
             };
 
-            const pushable = this.issues.map(x => { return { id: x.id, estimate: parseEstimate(x.title) }; }).filter(x => x.estimate != null);
-            ticketapi.bulkInsert(this.backendUrl, this.selectedRepository, pushable);
+            const pushable = this.issues.map(x => { return { ticket: x.id, estimate: parseEstimate(x.title) }; }).filter(x => x.estimate != null);
+            return ticketapi.bulkInsert(this.backendUrl, this.selectedRepository, pushable);
         },
         selectRepo(repo) {
             this.users = [];
             this.realUsers = [];
             this.issues = [];
+            this.filters.labels = [];
             this.filters.milestone = '';
             this.filters.owner = '';
             this.sorting.property = 'number';
@@ -156,46 +181,50 @@ export default {
 
             ghapi.issues(repo.owner, repo.name).then(data => {
                 this.issues = data.map(x => Object.assign({}, x, {estimation:0,materialized:0}));
-                this.parseAndSaveIssueEstimate();
+                this.parseAndSaveIssueEstimate().then(() => {
 
-                this.users = [...new Set(data.filter(x => x.user).map(x => x.user.login))].sort();
-                const self = this;
-                
-                const addUser = function(user) {
-                    if (self.realUsers.filter(x => x.login === user.login).length > 0)
-                        return;
-                    self.realUsers.push(user);
-                };
+                    this.users = [...new Set(data.filter(x => x.user).map(x => x.user.login))].sort();
+                    const self = this;
+                    
+                    const addUser = function(user) {
+                        if (self.realUsers.filter(x => x.login === user.login).length > 0)
+                            return;
+                        self.realUsers.push(user);
+                    };
 
-                data.filter(x => x.user || x.assignees.length).forEach(x => {
-                    x.assignees.forEach(y => addUser(y));
-                    addUser(x.user);
-                });
-
-                ticketapi.getAvailabilities(this.backendUrl, repo.id, null, this.realUsers.map(x => x.id))
-                .then(userData => {
-                    userData.availabilities.forEach(availability => {
-                        self.setFixedAvailability(availability.id, userData.repo, userData.milestone, availability.availability);
+                    data.filter(x => x.user || x.assignees.length).forEach(x => {
+                        x.assignees.forEach(y => addUser(y));
+                        addUser(x.user);
                     });
-                })
-                .catch(error => console.log(error));
 
-                ticketapi.getHours(this.backendUrl, repo.id, data.map(x => x.id))
-                .then(ticketData => {
-                    if (ticketData.repo === repo.id) {
-                        ticketData.hours.forEach(h => {
-                            let issue = this.issues.find(x => x.id === h.id);
-                            if (issue) {
-                                issue.estimation = h.estimate;
-                                issue.materialized = h.materialized;
-                                issue.readyPercentage = !h.estimate ? 0 : h.materialized / h.estimate * 100;
-                            }
+                    ticketapi.getAvailabilities(this.backendUrl, repo.id, null, this.realUsers.map(x => x.id))
+                    .then(userData => {
+                        userData.availabilities.forEach(availability => {
+                            self.setFixedAvailability(availability.id, userData.repo, userData.milestone, availability.availability);
                         });
-                    }
+                    })
+                    .catch(error => console.log(error));
+
+                    ticketapi.getHours(this.backendUrl, repo.id, data.map(x => x.id))
+                    .then(ticketData => {
+                        if (ticketData.repo === repo.id) {
+                            ticketData.hours.forEach(h => {
+                                let issue = this.issues.find(x => x.id === h.id);
+                                if (issue) {
+                                    issue.estimation = h.estimate;
+                                    issue.materialized = h.materialized;
+                                    issue.readyPercentage = !h.estimate ? 0 : h.materialized / h.estimate * 100;
+                                }
+                            });
+                        }
+                    })
+                    .catch(error => console.log(error));
                 })
                 .catch(error => console.log(error));
             });
-            ghapi.milestones(repo.owner, repo.name).then(data => this.milestones = data);
+
+            ghapi.milestones(repo.owner, repo.name).then(data => this.milestones = data).catch(error => console.log(error));
+            ghapi.labels(repo.owner, repo.name).then(data => this.labels = data).catch(error => console.log(error));
         },
         getSortIcon(property) {
             return property === this.sorting.property ?
@@ -251,17 +280,20 @@ export default {
         },
         estimationChanged(issue, value) {
             issue.estimation = value === undefined ? issue.estimation : value;
-            ticketapi.setHours(this.backendUrl, this.selectedRepository, issue.id, issue.estimation, issue.materialized);
-            issue.readyPercentage = !issue.estimation ? 0 : issue.materialized / issue.estimation * 100;
+            ticketapi.setHours(this.backendUrl, this.selectedRepository, issue.id, issue.estimation, issue.materialized)
+            .then(() => {issue.readyPercentage = !issue.estimation ? 0 : issue.materialized / issue.estimation * 100;})
+            .catch(error => console.log(error));
         },
         materializedChanged(issue, value) {
             issue.materialized = value === undefined ? issue.materialized : value;
-            ticketapi.setHours(this.backendUrl, this.selectedRepository, issue.id, issue.estimation, issue.materialized);
-            issue.readyPercentage = !issue.estimation ? 0 : issue.materialized / issue.estimation * 100;
+            ticketapi.setHours(this.backendUrl, this.selectedRepository, issue.id, issue.estimation, issue.materialized)
+            .then(() => {issue.readyPercentage = !issue.estimation ? 0 : issue.materialized / issue.estimation * 100;})
+            .catch(error => console.log(error));
         },
         availabilityChanged(event, user, value) {
             ticketapi.setAvailability(this.backendUrl, this.selectedRepository, this.filters.milestone, user.id, value || event.target.value)
-            .then(x => { this.setFixedAvailability(user.id, this.selectedRepository, this.filters.milestone, x.availability); });
+            .then(x => { this.setFixedAvailability(user.id, this.selectedRepository, this.filters.milestone, x.availability); })
+            .catch(error => console.log(error));
         },
         milestoneChanged() {
             const self = this;
@@ -312,6 +344,14 @@ export default {
                 });
             }
 
+            const labelFilter = function(issue) {
+                const intersection = function(a, b) {
+                    return a.filter(x => b.includes(x));
+                };
+
+                return (this.length === 1 && this[0] === '') || intersection(this, issue.labels.map(x => x.id)).length === this.length;
+            };
+
             const milestoneFilter = function(issue) {
                 return (!this && !issue.milestone) || (this === issue.milestone?.id);
             };
@@ -320,6 +360,8 @@ export default {
                 return (!this && !issue.assignees.length) || (issue.assignees.filter(x => x.login === this).length > 0);
             }
 
+            if (this.filters.labels.length > 0)
+                addFilter(this.filters.labels, labelFilter);
             if (this.filters.milestone)
                 addFilter(this.filters.milestone, milestoneFilter);
             if (this.filters.owner)
@@ -426,4 +468,28 @@ export default {
     .green {
         background-color: green;
     }
+
+    label {
+        font-weight: bold;
+        margin-right: 1rem;
+    }
+
+    .labels {
+        list-style: none;
+        padding: 0;
+    }
+
+    .labels li {
+        max-width: 10rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .label-indicator {
+        display: inline-block;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 3px;
+    }
+
 </style>

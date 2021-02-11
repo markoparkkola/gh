@@ -36,6 +36,25 @@ const ghapi = {
             .catch(error => reject(error));
         });
     },
+    labels(owner, repo) {
+        return new Promise((resolve, reject) => {
+            let labels = [];
+
+            const fetchFn = function(page) {
+                axios.get(`https://api.github.com/repos/${owner}/${repo}/labels?per_page=100&page=${page}`)
+                .then(response => {
+                    labels = labels.concat(response.data);
+                    if (response.data.length === 100)
+                        fetchFn(page + 1);
+                    else
+                        resolve(labels);
+                })
+                .catch(error => reject(error));
+            };
+
+            fetchFn(0);
+        });
+    },
     milestones(owner, repo) {
         return new Promise((resolve, reject) => {
             axios.get(`https://api.github.com/repos/${owner}/${repo}/milestones`)

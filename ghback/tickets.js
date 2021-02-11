@@ -5,9 +5,62 @@ const hostname = '127.0.0.1';
 const port = 3000;
 
 let Datastore = require('nedb');
-let database = new Datastore({ filename: 'tickets.db', autoload: true });
-database.ensureIndex({ fieldName: 'ticket', unique: true });
-database.ensureIndex({ fieldName: 'user', unique: true, sparse: true });
+
+const databaseService = function() {
+  const self = this;
+  this.ticketDb = new Datastore({ filename: 'tickets.db', autoload: true });
+  this.ticketDb.ensureIndex({ fieldName: 'ticket', unique: true });
+
+  this.userDb = new Datastore({ filename: 'availabilities.db', autoload: true });
+  this.userDb.ensureIndex({ fieldName: 'user', unique: true });
+  
+  this.assertNumber = function(value) {
+    if (value == null || value == undefined || typeof value === 'number')
+      return value;
+    else
+      return parseInt(value);
+  };
+
+  return {
+    storeHours: function(repo, ticket, estimate, materialized, callback) {
+      self.ticketDb.findOne({repo: repo, ticket: ticket}, function(err, doc) {
+        estimate = self.assertNumber(estimate);
+        materialized = self.assertNumber(materialized);
+        if (doc)
+          self.ticketDb.update({ repo: repo, ticket: ticket }, { $inc: { estimate: estimate, materialized: materialized }}, callback);
+        else
+          self.ticketDb.insert({ repo: repo, ticket: ticket, estimate: estimate, materialized: materialized }, callback);
+      });
+    },
+    findHours: function(repo, tickets, callback) {
+      if (typeof tickets === 'number')
+        self.ticketDb.findOne({repo: repo, ticket: tickets}, callback);
+      else
+        self.ticketDb.find({repo: repo, ticket: { $in: tickets }}, callback);
+    },
+    storeAvailabilities: function(repo, milestone, user, availability, callback) {
+      const query = { repo: repo, milestone: milestone, user: user };
+      if (availability < 0)
+        self.userDb.remove({ repo: repo, milestone: milestone, user: user }, callback);
+      else
+        self.userDb.findOne({ repo: repo, milestone: milestone, user: user }, function(err, doc) {
+          availability = self.assertNumber(availability);
+          if (doc)
+            self.userDb.update({ repo: repo, milestone: milestone, user: user }, { $inc: { availability: availability }}, callback);
+          else
+            self.userDb.insert({ repo: repo, milestone: milestone, user: user, availability: availability }, callback);
+        });
+    },
+    findAvailabilities: function(repo, milestone, users, callback) {
+      if (!users || !users.length)
+        callback(null, []);
+      else
+        self.userDb.find({repo: repo, milestone: milestone, user: { $in: users }}, callback);
+    }
+  };
+};
+
+const databaseServiceSingleton = new databaseService();
 
 const controllers = {
   ticket: function(db) {
@@ -15,22 +68,18 @@ const controllers = {
 
     return {
       hours: function(req, res, data) {
-        this.db.find({ repo: data.repo, ticket: { $in: data.tickets } }, function(err, docs) {
+        this.db.findHours(data.repo, data.tickets, function(err, docs) {
           let result = {
-            repo: data.repo
+            repo: data.repo,
+            error: err,
+            hours: docs ? docs.map(x => { return { id: x.ticket, estimate: x.estimate || 0, materialized: x.materialized || 0 }; }) : []
           };
-
-          if (err)
-            result.error = err;
-          else {
-            result.hours = docs ? docs.map(x => { return { id: x.ticket, estimate: x.estimate || 0, materialized: x.materialized || 0 }; }) : [];
-          }
 
           res.end(JSON.stringify(result));
         });
       },
       sethours: function(req, res, data) {
-        this.db.update({ repo: data.repo, ticket: data.ticket }, { repo: data.repo, ticket: data.ticket, estimate: data.estimate, materialized: data.materialized }, { upsert: true }, function(err) {
+        this.db.storeHours(data.repo, data.ticket, data.estimate, data.materialized, function(err) {
           let result = {
             repo: data.repo,
             id: data.ticket,
@@ -49,7 +98,7 @@ const controllers = {
 
     return {
       availabilities: function(req, res, data) {
-        this.db.find({ repo: data.repo, milestone: data.milestone, user: { $in: data.users } }, function(err, docs) {
+        this.db.findAvailabilities(data.repo, data.milestone, data.users, function(err, docs) {
           let result = {
             availabilities: docs ? docs.map(x => { return { id: x.user, availability: x.availability }; }) : [],
             repo: data.repo, 
@@ -61,30 +110,20 @@ const controllers = {
         });
       },
       availability: function(req, res, data) {
-        if (data.availability < 0)
-          this.db.remove({ repo: data.repo, milestone: data.milestone, user: data.user }, function(err) {
-            let result = {
-              id: data.user,
-              repo: data.repo,
-              milestone: data.milestone,
-              availability: null,
-              error: err
-            };
+        if (data.availability == undefined)
+          data.availability = -1;
 
-            res.end(JSON.stringify(result));
-          });
-        else
-          this.db.update({ repo: data.repo, milestone: data.milestone, user: data.user}, { repo: data.repo, milestone: data.milestone, user: data.user, availability: data.availability }, { upsert: true }, function(err) {
-            let result = {
-              id: data.user,
-              repo: data.repo,
-              milestone: data.milestone,
-              availability: data.availability,
-              error: err
-            };
+        this.db.storeAvailabilities(data.repo, data.milestone, data.user, data.availability, function(err) {
+          let result = {
+            id: data.user,
+            repo: data.repo,
+            milestone: data.milestone,
+            availability: data.availability < 0 ? null : data.availability,
+            error: err
+          };
 
-            res.end(JSON.stringify(result));
-          });
+          res.end(JSON.stringify(result));
+        });
       }
     };
   },
@@ -93,27 +132,19 @@ const controllers = {
 
     return {
       bulkInsert: function(req, res, data) {
-        const issues = data.estimates.filter(x => x.estimate > 0).map(x => { return { repo: data.repo, ticket: x.id, estimate: x.estimate, materialized: 0 }; });
+        const issues = data.estimates.filter(x => x.ticket && x.estimate > 0).map(x => { return { repo: data.repo, ticket: x.ticket, estimate: x.estimate, materialized: 0 }; });
         issues.forEach(issue => {
-          this.db.findOne({ repo: issue.repo, ticket: issue.ticket}, function(err, doc) {
-            if (!err && !doc)
-              this.db.insert(issue, function(err, doc) {
-                console.log('bulk insert failed', issue, err);
+          this.db.findHours(issue.repo, issue.ticket, function(err, doc) {
+            if (err)
+              console.log('BulkInsert - Error', err);
+            else if (!doc) {
+              this.db.storeHours(issue.repo, issue.ticket, issue.estimate, 0, function(err, doc) {
+
               });
+            }
           });
         });
         res.end(null);
-      },
-      clear: function(req, res, data) {
-        if (data.run === true) {
-          this.db.remove({}, { multi: true }, function (err, numRemoved) {
-            let result = {
-              removed: numRemoved,
-              error: err
-            };
-            res.end(JSON.stringify(result));
-          });
-        }
       }
     };
   }
@@ -163,7 +194,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    const actionHandler = controller(database)[request[1]];
+    const actionHandler = controller(databaseServiceSingleton)[request[1]];
     if (!actionHandler) {
       console.log('Action not found.');
       res.statusCode = 400;

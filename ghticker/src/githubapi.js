@@ -52,7 +52,7 @@ const ghapi = {
                 .catch(error => reject(error));
             };
 
-            fetchFn(0);
+            fetchFn(1);
         });
     },
     milestones(owner, repo) {

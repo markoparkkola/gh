@@ -13,9 +13,7 @@
                 <th>Title <span class="icon clickable" @click.stop="setSort('title')">{{getSortIcon('title')}}</span></th>
                 <th>State <span class="icon clickable" @click.stop="setSort('state')">{{getSortIcon('state')}}</span></th>
                 <th>
-                    <button @click="showLabelSelector=!showLabelSelector">Labels</button>
-                    <MultiSelector :items="labels" :valueName="id" :labelName="name" v-if="showLabelSelector"></MultiSelector>
-
+                    <MultiSelector :source="labels" valueMember="id" displayMember="name" @selected="labelsChanged"></MultiSelector>
                     <span class="icon clickable" @click.stop="setSort('labels')">{{getSortIcon('labels')}}</span>
                 </th>
                 <th>
@@ -133,8 +131,7 @@ export default {
             sorting: {
                 property: 'number',
                 direction: 'down'
-            },
-            showLabelSelector: false
+            }
         }
     },
     components: {
@@ -295,6 +292,9 @@ export default {
             .then(x => { this.setFixedAvailability(user.id, this.selectedRepository, this.filters.milestone, x.availability); })
             .catch(error => console.log(error));
         },
+        labelsChanged(selectedLabels) {
+            this.filters.labels = selectedLabels.map(x => x.id);
+        },
         milestoneChanged() {
             const self = this;
             ticketapi.getAvailabilities(this.backendUrl, this.selectedRepository, this.filters.milestone, this.realUsers.map(x => x.id))
@@ -432,9 +432,11 @@ export default {
 
     .table span.icon {
         position: absolute;
+        top: 50%;
         right: 0;
         width: 2rem;
         text-align: right;
+        transform: translateY(-50%);
     }
 
     .avatar {

@@ -19,7 +19,7 @@ export default {
   data() {
     //store.set('backendUrl', 'http://localhost:3000/');
     let backendUrl = store.get('backendUrl');
-    if (!backendUrl.match(/\/$/))
+    if (backendUrl && backendUrl.length && !backendUrl.match(/\/$/))
       backendUrl += '/';
 
     return {

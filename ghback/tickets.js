@@ -1,7 +1,7 @@
 //Load HTTP module
 const { DH_CHECK_P_NOT_PRIME } = require("constants");
 const http = require("http");
-const hostname = '127.0.0.1';
+const hostname = '0.0.0.0';
 const port = 3000;
 
 let Datastore = require('nedb');
